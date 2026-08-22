@@ -18,6 +18,7 @@ const zipPassword = argv.zipPassword || '';
 console.log("📥 Starting download from", serverURL);
 console.log("🗂 Sync IDs:", syncIdList);
 console.log("📦 Archive format:", zipEnable ? zipType : 'none (uncompressed)');
+console.log("🔒 Password protection:", zipPassword ? 'enabled' : 'disabled');
 
 function buildArchiveCommand(sourceDir, zipPath) {
     if (!zipEnable) {
@@ -25,7 +26,7 @@ function buildArchiveCommand(sourceDir, zipPath) {
         return `cd ${sourceDir} && tar -cf ${zipPath} .`;
     }
     if (zipType === '7z') {
-        const pwFlag = zipPassword ? `-p"${zipPassword}"` : '';
+        const pwFlag = zipPassword ? `-p"${zipPassword}" -mhe=on` : '';
         return `cd ${sourceDir} && 7z a -t7z -m0=lzma2 -mx=9 -mfb=64 -md=32m -ms=on ${pwFlag} "${zipPath}" .`;
     }
     // zip
