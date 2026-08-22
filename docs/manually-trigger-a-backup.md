@@ -14,14 +14,6 @@ If you have already configured your docker compose file correctly, you can trigg
 docker compose run --rm backup backup
 ```
 
-Alternatively, if the container is already running with `supercronic`, you can trigger a backup without stopping it:
-
-```shell
-docker exec <container> bash /app/backup.sh
-```
-
-Replace `<container>` with your container name (e.g. `actualbudget-backup-backup-1`).
-
 If you have not configured Docker compose yet, you can run the image manually, and specify the env variables on the cli as follows
 
 ```shell
