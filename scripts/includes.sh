@@ -28,10 +28,21 @@ function color() {
 #     None
 ########################################
 function check_rclone_connection() {
-    # check configuration exist
+    # check configuration exists (config file or env vars)
     local RCLONE_CONFIG_FILE=$(rclone config file 2>&1 | grep -o '/[^[:space:]]*rclone\.conf')
-    grep -c "\[${RCLONE_REMOTE_NAME}\]" "${RCLONE_CONFIG_FILE}" > /dev/null 2>&1
-    if [[ $? != 0 ]]; then
+    local HAS_CONFIG_FILE=false
+    if [[ -f "${RCLONE_CONFIG_FILE}" ]]; then
+        grep -c "\[${RCLONE_REMOTE_NAME}\]" "${RCLONE_CONFIG_FILE}" > /dev/null 2>&1 && HAS_CONFIG_FILE=true
+    fi
+
+    # Check if remote is configured via env vars (RCLONE_CONFIG_<NAME>_TYPE)
+    local REMOTE_NAME_UPPER=$(echo "${RCLONE_REMOTE_NAME}" | tr '[:lower:]' '[:upper:]')
+    local HAS_ENV_CONFIG=false
+    if [[ -n "$(eval echo \${RCLONE_CONFIG_${REMOTE_NAME_UPPER}_TYPE:-})" ]]; then
+        HAS_ENV_CONFIG=true
+    fi
+
+    if [[ "${HAS_CONFIG_FILE}" == false && "${HAS_ENV_CONFIG}" == false ]]; then
         color red "rclone configuration information not found"
         color blue "Please configure rclone first, check https://github.com/rodriguestiago0/actualbudget-backup#configure-rclone-%EF%B8%8F-must-read-%EF%B8%8F"
         exit 1
@@ -152,6 +163,26 @@ function get_env() {
 }
 
 ########################################
+# Load rclone secrets from _FILE env vars.
+# Reads RCLONE_CONFIG_*_FILE and exports as RCLONE_CONFIG_*
+# Arguments:
+#     None
+########################################
+function load_rclone_secrets() {
+    for var_name in $(env | grep '^RCLONE_CONFIG_.*_FILE=' | cut -d= -f1); do
+        local file_path="${!var_name}"
+        local target_var="${var_name%_FILE}"
+        if [[ -f "${file_path}" ]]; then
+            local value=$(tr -d '\n\r' < "${file_path}")
+            export "${target_var}=${value}"
+            color yellow "Loaded ${target_var} from file"
+        else
+            color red "File not found for ${var_name}: ${file_path}"
+        fi
+    done
+}
+
+########################################
 # Get RCLONE_REMOTE_LIST variables.
 # Arguments:
 #     None
@@ -266,7 +297,66 @@ function init_actual_env(){
 }
 
 ########################################
-# Initialization environment variables.
+# Send webhook notification.
+# Arguments:
+#     URL
+#     custom message template (optional)
+#     status message
+########################################
+function send_webhook() {
+    local URL="$1"
+    local MESSAGE="$2"
+    local STATUS="$3"
+
+    if [[ -z "${URL}" ]]; then
+        return
+    fi
+
+    local TIMESTAMP=$(date -Iseconds)
+    local BODY
+
+    if [[ -n "${MESSAGE}" ]]; then
+        BODY=$(echo "${MESSAGE}" | sed \
+            -e "s|{message}|${STATUS}|g" \
+            -e "s|{service}|actualbudget-backup|g" \
+            -e "s|{timestamp}|${TIMESTAMP}|g")
+    else
+        BODY="{\"service\": \"actualbudget-backup\", \"message\": \"${STATUS}\", \"timestamp\": \"${TIMESTAMP}\"}"
+    fi
+
+    curl -s -X POST "${URL}" \
+        -H "Content-Type: application/json" \
+        -d "${BODY}" \
+        || color red "webhook notification failed"
+}
+
+########################################
+# Send notification on backup status.
+# Arguments:
+#     status (start / success / failure)
+#     detail message
+########################################
+function send_notification() {
+    local STATUS="$1"
+    local DETAIL="$2"
+    local SUBJECT="Actual Budget Backup ${STATUS}"
+
+    case "${STATUS}" in
+        start)
+            send_webhook "${WEBHOOK_URL}" "${WEBHOOK_MESSAGE}" "${SUBJECT}: ${DETAIL}"
+            ;;
+        success)
+            send_webhook "${WEBHOOK_URL}" "${WEBHOOK_MESSAGE}" "${SUBJECT}: ${DETAIL}"
+            send_webhook "${WEBHOOK_SUCCESS_URL}" "${WEBHOOK_SUCCESS_MESSAGE}" "${SUBJECT}: ${DETAIL}"
+            ;;
+        failure)
+            send_webhook "${WEBHOOK_URL}" "${WEBHOOK_MESSAGE}" "${SUBJECT}: ${DETAIL}"
+            send_webhook "${WEBHOOK_ERROR_URL}" "${WEBHOOK_ERROR_MESSAGE}" "${SUBJECT}: ${DETAIL}"
+            ;;
+    esac
+}
+
+########################################
 # Arguments:
 #     None
 # Outputs:
@@ -275,6 +365,9 @@ function init_actual_env(){
 function init_env() {
     # export
     export_env_file
+
+    # load rclone secrets from _FILE env vars
+    load_rclone_secrets
 
     # CRON
     get_env CRON
@@ -300,6 +393,10 @@ function init_env() {
     # BACKUP_KEEP_DAYS
     get_env BACKUP_KEEP_DAYS
     BACKUP_KEEP_DAYS="${BACKUP_KEEP_DAYS:-"0"}"
+
+    # RETENTION_COUNT
+    get_env RETENTION_COUNT
+    RETENTION_COUNT="${RETENTION_COUNT:-"0"}"
 
     # ZIP_ENABLE
     get_env ZIP_ENABLE
@@ -335,6 +432,17 @@ function init_env() {
         TIMEZONE="UTC"
     fi
 
+    # BACKUP_ON_START
+    get_env BACKUP_ON_START
+
+    # WEBHOOK
+    get_env WEBHOOK_URL
+    get_env WEBHOOK_MESSAGE
+    get_env WEBHOOK_SUCCESS_URL
+    get_env WEBHOOK_SUCCESS_MESSAGE
+    get_env WEBHOOK_ERROR_URL
+    get_env WEBHOOK_ERROR_MESSAGE
+
     init_actual_env
 
     color yellow "========================================"
@@ -351,6 +459,17 @@ function init_env() {
     color yellow "ZIP_TYPE: ${ZIP_TYPE}"
     color yellow "BACKUP_FILE_DATE_FORMAT: ${BACKUP_FILE_DATE_FORMAT} (example \"[filename].$(date +"${BACKUP_FILE_DATE_FORMAT}").zip\")"
     color yellow "BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS}"
+    color yellow "RETENTION_COUNT: ${RETENTION_COUNT}"
+
+    if [[ -n "${WEBHOOK_URL}" ]]; then
+        color yellow "WEBHOOK_URL: configured"
+    fi
+    if [[ -n "${WEBHOOK_SUCCESS_URL}" ]]; then
+        color yellow "WEBHOOK_SUCCESS_URL: configured"
+    fi
+    if [[ -n "${WEBHOOK_ERROR_URL}" ]]; then
+        color yellow "WEBHOOK_ERROR_URL: configured"
+    fi
 
     color yellow "TIMEZONE: ${TIMEZONE}"
     color yellow "========================================"

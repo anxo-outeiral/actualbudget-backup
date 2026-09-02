@@ -26,6 +26,12 @@ check_rclone_connection all
 configure_timezone
 configure_cron
 
+# backup on start
+if [[ "${BACKUP_ON_START}" == "true" || "${BACKUP_ON_START}" == "TRUE" ]]; then
+    color yellow "BACKUP_ON_START is enabled, running backup now..."
+    bash "/app/backup.sh" || color red "Initial backup failed, continuing with cron..."
+fi
+
 # backup manually
 if [[ "$1" == "backup" ]]; then
     color yellow "Manually triggering a backup will only execute the backup script once, and the container will exit upon completion."

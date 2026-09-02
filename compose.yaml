@@ -16,6 +16,11 @@ services:
     #   ZIP_TYPE: 'zip'
     #   BACKUP_FILE_SUFFIX: '%Y%m%d'
     #   BACKUP_KEEP_DAYS: 0
+    #   RETENTION_COUNT: 0
+    #   BACKUP_ON_START: 'false'
+    #   WEBHOOK_URL: ''
+    #   WEBHOOK_SUCCESS_URL: ''
+    #   WEBHOOK_ERROR_URL: ''
     #   TIMEZONE: 'UTC'
     volumes:
       - actualbudget-rclone-data:/config/

@@ -188,6 +188,58 @@ Only keep last a few days backup files in the storage system. Set to `0` to keep
 
 Default: `0`
 
+### RETENTION_COUNT
+
+Keep only the last N backup files in the storage system (by count, not by age). Set to `0` to disable. Works alongside `BACKUP_KEEP_DAYS` — both are applied if set.
+
+Default: `0`
+
+### BACKUP_ON_START
+
+Run a backup immediately when the container starts, before the cron scheduler begins. Useful for verifying configuration on first deploy.
+
+Default: `false`
+
+### WEBHOOK_URL
+
+URL to POST a notification on every backup event (start, success, failure). Works with Healthchecks.io, ntfy, or any HTTP endpoint. For Discord/Slack, use `WEBHOOK_MESSAGE` to customize the payload.
+
+### WEBHOOK_SUCCESS_URL
+
+URL to POST a notification only on backup success.
+
+### WEBHOOK_ERROR_URL
+
+URL to POST a notification only on backup failure.
+
+### WEBHOOK_MESSAGE / WEBHOOK_SUCCESS_MESSAGE / WEBHOOK_ERROR_MESSAGE
+
+Custom JSON payload for each webhook. Supports placeholders: `{message}`, `{service}`, `{timestamp}`. If not set, a default JSON payload is used.
+
+**Discord example:**
+
+```yaml
+WEBHOOK_ERROR_URL: 'https://discord.com/api/webhooks/xxx/yyy'
+WEBHOOK_ERROR_MESSAGE: '{"content": "🚨 {service}: {message}"}'
+```
+
+**ntfy example:**
+
+```yaml
+WEBHOOK_SUCCESS_URL: 'https://ntfy.sh/your-topic'
+WEBHOOK_SUCCESS_MESSAGE: '{message}'
+```
+
+### RCLONE_CONFIG_* (env-based rclone config)
+
+Instead of mounting an `rclone.conf` file, you can configure rclone backends via environment variables. Any `RCLONE_CONFIG_<NAME>_<KEY>` var is passed to rclone. This also supports `_FILE` suffix for secrets.
+
+```yaml
+RCLONE_CONFIG_MEGA_TYPE: 'mega'
+RCLONE_CONFIG_MEGA_USER: 'your-email'
+RCLONE_CONFIG_MEGA_PASS_FILE: '/secrets/mega-password'
+```
+
 ### BACKUP_FILE_SUFFIX
 
 Each backup file is suffixed by default with `%Y%m%d`. If you back up your budget multiple times a day, that suffix is not unique any more. This environment variable allows you to append a unique suffix to that date to create a unique backup name.
@@ -261,6 +313,14 @@ docker run -d \
 ## About Priority
 
 We will use the environment variables first, followed by the contents of the file ending in `_FILE` as defined by the environment variables. Next, we will use the contents of the file ending in `_FILE` as defined in the `.env` file, and finally the values from the `.env` file itself.
+
+## Security considerations
+
+- **Backup password**: Use a strong, unique password for `ZIP_PASSWORD`, stored separately from your Actual Budget password
+- **File-based secrets**: Prefer `_FILE` env vars over plain env vars for sensitive values. Env vars can leak through process listings, debug logs, and container inspection
+- **rclone secrets**: Use `RCLONE_CONFIG_*_FILE` to load rclone credentials from files (e.g. Docker secrets in `/run/secrets/`)
+- **Restrict file permissions**: `chmod 600` on any secret files mounted into the container
+- **Actual Budget password**: This tool requires your Actual Budget server password — consider the implications for your threat model
 
 ## Advance
 

@@ -120,11 +120,40 @@ function clear_history() {
     fi
 }
 
+function clear_history_by_count() {
+    if [[ "${RETENTION_COUNT}" -gt 0 ]]; then
+        for RCLONE_REMOTE_X in "${RCLONE_REMOTE_LIST[@]}"
+        do
+            color blue "keep last ${RETENTION_COUNT} backup files $(color yellow "[${RCLONE_REMOTE_X}]")"
+
+            mapfile -t RCLONE_FILE_LIST < <(rclone ${RCLONE_GLOBAL_FLAG} lsf "${RCLONE_REMOTE_X}" --files-only | sort -r)
+
+            local COUNT=0
+            for RCLONE_DELETE_FILE in "${RCLONE_FILE_LIST[@]}"
+            do
+                ((COUNT++))
+                if [[ ${COUNT} -gt ${RETENTION_COUNT} ]]; then
+                    color yellow "deleting \"${RCLONE_DELETE_FILE}\""
+
+                    rclone ${RCLONE_GLOBAL_FLAG} deletefile "${RCLONE_REMOTE_X}/${RCLONE_DELETE_FILE}"
+                    if [[ $? != 0 ]]; then
+                        color red "delete \"${RCLONE_DELETE_FILE}\" failed"
+                    fi
+                fi
+            done
+        done
+    fi
+}
+
 color blue "running the backup program at $(date +"%Y-%m-%d %H:%M:%S %Z")"
 
 init_env
 
 NOW="$(date +"${BACKUP_FILE_DATE_FORMAT}")"
+
+trap 'send_notification "failure" "Backup failed at $(date +"%Y-%m-%d %H:%M:%S %Z")"' ERR
+
+send_notification "start" "Start backup at $(date +"%Y-%m-%d %H:%M:%S %Z")"
 
 check_rclone_connection any
 
@@ -133,4 +162,6 @@ backup
 upload
 clear_dir
 clear_history
+clear_history_by_count
+send_notification "success" "Backup completed successfully at $(date +"%Y-%m-%d %H:%M:%S %Z")"
 color none ""

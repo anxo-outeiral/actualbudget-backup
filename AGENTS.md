@@ -4,16 +4,16 @@ Guidance for OpenCode sessions working in this repo.
 
 ## What this is
 
-Docker image that backs up [Actual Budget](https://actualbudget.org) budgets via `@actual-app/api` and uploads them to remote storage via [rclone](https://rclone.org). Scheduled with `supercronic`. No application framework, no build system, no tests.
+Docker image that backs up [Actual Budget](https://actualbudget.org) budgets via `@actual-app/api` and uploads them to remote storage via [rclone](https://rclone.org). Scheduled with `supercronic`. No application framework, no build system. Tests via `bats` in `test/`.
 
 This repo is a fork of `rodriguestiago0/actualbudget-backup`. The CI workflow (`.github/workflows/docker-image.yml`) still publishes to the upstream Docker Hub namespace `rodriguestiago0/actualbudget-backup`, triggered on GitHub release publish. Changing the publish target means editing both the workflow `images:` field and `compose.yaml`.
 
 ## Layout
 
 - `Dockerfile` — base `rclone/rclone:sha-9ee9d0a` (pinned by SHA; a version tag line is commented out below it). Installs `nodejs npm` + shell tools including `7zip` and `tzdata`. Copies `scripts/*` flat into `/app/`. ENTRYPOINT `/app/entrypoint.sh`.
-- `scripts/entrypoint.sh` — `init_env` → `check_rclone_connection all` → configure timezone/cron → run `supercronic` in foreground. Special args: `backup` runs `backup.sh` once and exits; `rclone ...` is a passthrough to the rclone binary.
-- `scripts/backup.sh` — sources `includes.sh`; flow is `clear_dir → backup (download) → upload → clear_dir → clear_history`. Exits 1 if a generated archive is missing/empty. Uses `check_rclone_connection any` (continues if some remotes fail, exits if all fail).
-- `scripts/includes.sh` — env resolution, rclone connection checks, multi-remote/multi-sync-id list builders. All env handling lives here.
+- `scripts/entrypoint.sh` — `init_env` → `check_rclone_connection all` → configure timezone/cron → optional `BACKUP_ON_START` → run `supercronic` in foreground. Special args: `backup` runs `backup.sh` once and exits; `rclone ...` is a passthrough to the rclone binary.
+- `scripts/backup.sh` — sources `includes.sh`; flow is `clear_dir → backup (download) → upload → clear_dir → clear_history → clear_history_by_count`. Sends webhook notifications on start/success/failure (via ERR trap). Exits 1 if a generated archive is missing/empty. Uses `check_rclone_connection any` (continues if some remotes fail, exits if all fail).
+- `scripts/includes.sh` — env resolution, rclone connection checks (supports config file and `RCLONE_CONFIG_*` env vars), multi-remote/multi-sync-id list builders, webhook notifications, `load_rclone_secrets()` for `_FILE` rclone config. All env handling lives here.
 - `scripts/download-actual-budget.js` — Node script using `@actual-app/api`. Parses argv with `minimist`. Called from `backup.sh` with explicit flags (not env vars). Creates archives via `7z` (supports `zip` and `7z` formats with optional password).
 - `docs/` — user-facing docs (getting started, multiple remotes/sync-ids, manual trigger, E2E encryption). `README.md` is the canonical reference for env vars.
 - `compose.yaml` — example runtime config; the rclone volume `actualbudget-rclone-data` is `external: true` and must be created/configured out of band.
@@ -42,6 +42,9 @@ docker run --rm -it \
 - **`RCLONE_GLOBAL_FLAG` must not change rclone output** (e.g. `-P`); `clear_history` parses `rclone lsf` output line-by-line, so progress flags corrupt deletion.
 - **Backup archive naming**: `backup.<syncId>.<NOW>.<ext>` where `NOW = date +<BACKUP_FILE_DATE_FORMAT>` and `<ext>` is `zip`, `7z`, or `tar` (when `ZIP_ENABLE=FALSE`). `BACKUP_FILE_SUFFIX` overrides `BACKUP_FILE_DATE` + `BACKUP_FILE_DATE_SUFFIX`; `/` is stripped from the format.
 - **`.dockerignore` excludes `README.md`, `LICENSE`, `docker-compose*`, `compose*`, `Dockerfile*`, `.env`, `.git`** from the build context. Only `scripts/*` actually gets copied into the image.
+- **rclone config via env vars**: `check_rclone_connection` accepts either a config file (`[remote]` section) or `RCLONE_CONFIG_<NAME>_TYPE` env vars. `load_rclone_secrets()` reads `RCLONE_CONFIG_*_FILE` vars and exports them as `RCLONE_CONFIG_*` for rclone to use.
+- **Retention**: `BACKUP_KEEP_DAYS` (by age, via `rclone lsf --min-age`) and `RETENTION_COUNT` (by count, via `rclone lsf --files-only | sort -r`) are both applied if set. Neither affects the other.
+- **Webhooks**: `WEBHOOK_URL` fires on all events, `WEBHOOK_SUCCESS_URL` on success, `WEBHOOK_ERROR_URL` on failure. `WEBHOOK_MESSAGE` supports `{message}`, `{service}`, `{timestamp}` placeholders. The ERR trap in `backup.sh` ensures failure notifications fire on `exit 1`.
 
 ## Style
 
